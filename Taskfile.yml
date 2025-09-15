@@ -1,0 +1,30 @@
+# https://taskfile.dev
+
+version: '3'
+
+dotenv: ['.env']
+
+
+tasks:
+  default:
+    cmds:
+      - air
+    silent: true
+  db:up:
+    cmds:
+      - docker compose up
+  db:migrate:create:
+    cmds:
+      - migrate create -ext sql -dir database/migrations -seq {{.name}}
+  db:migrate:up:
+    cmds:
+      - migrate -path database/migrations -database $DB_URL up 1
+  db:migrate:down:
+    cmds:
+      - migrate -path database/migrations -database $DB_URL down 1
+  db:migrate:force:
+    cmds:
+      - migrate -path database/migrations -database $DB_URL force {{.version}}
+  sqlc:
+    cmds:
+      - go tool sqlc generate
