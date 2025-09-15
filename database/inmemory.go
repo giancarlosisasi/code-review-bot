@@ -10,8 +10,8 @@ import (
 )
 
 type InMemoryDatabase struct {
-	Assignees   models.Assignees
-	TeamMembers []models.TeamMember
+	TeamMembers      []models.TeamMember
+	WorkloadByUserID models.WorkloadByUserID
 }
 
 func NewInMemoryDatabase() *InMemoryDatabase {
@@ -34,7 +34,7 @@ func NewInMemoryDatabase() *InMemoryDatabase {
 
 	// load users.json file
 	return &InMemoryDatabase{
-		Assignees:   map[string]models.GitlabMergeRequest{},
-		TeamMembers: teamMembers,
+		WorkloadByUserID: map[string][]models.WorkloadDetail{},
+		TeamMembers:      teamMembers,
 	}
 }

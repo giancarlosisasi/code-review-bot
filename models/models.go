@@ -18,16 +18,12 @@ type TeamMember struct {
 	SlackMemberID   string          `json:"slack_member_id"`
 	SeniorityWeight SeniorityWeight `json:"seniority_weight"`
 	// frontend, backend, etc
-	TeamSlug string `json:"team_slug"`
+	TeamGuild string `json:"team_guild"`
 }
 
-func (tm TeamMember) GetId() string {
-	return tm.Id
+type WorkloadDetail struct {
+	MergeRequestIID string `json:"iid"`
+	MergeRequestURL string `json:"url"`
 }
 
-type GitlabMergeRequest struct {
-	ID  string `json:"id"`
-	URL string `json:"url"`
-}
-
-type Assignees map[string]GitlabMergeRequest
+type WorkloadByUserID map[string][]WorkloadDetail
