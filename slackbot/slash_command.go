@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/giancarlosisasi/code-review-bot/models"
 	"github.com/giancarlosisasi/code-review-bot/utils"
 	"github.com/rs/zerolog/log"
 	"github.com/slack-go/slack"
@@ -13,6 +14,7 @@ import (
 )
 
 const MAX_NUMBER_OF_REVIEWERS = 2
+const MaxMRsPerPerson = 3
 const mergeRequestStateOpened = "opened"
 
 var teamGuildFrontend = "frontend"
@@ -150,10 +152,109 @@ func (sb *SlackBot) handleCodeReviewSlackCommand(cmd slack.SlashCommand, event s
 	}
 
 	// 2. Run the algorithm to get two members to be assigned to the current mr excluding the author ID
-	// membersToExcludeIDs := append(reviewersGitlabMemberIDs, strconv.Itoa(mergeRequest.Author.ID))
-	// membersAvailable := sb.teamMembersRepository.GetTeamMembersExcludingMembers(membersToExcludeIDs, &teamGuildFrontend)
+	membersToExcludeIDs := append(reviewersGitlabMemberIDs, strconv.Itoa(mergeRequest.Author.ID))
+	availableMembers := sb.teamMembersRepository.GetTeamMembersExcludingMembers(membersToExcludeIDs, &teamGuildFrontend)
+
+	if len(availableMembers) == 0 {
+		_, _, err = sb.slackClient.PostMessage(cmd.ChannelID, slack.MsgOptionText(
+			fmt.Sprintf("No available members in the %s guild. Contact to the Guild Lead for solve this.", teamGuildFrontend),
+			false,
+		))
+		if err != nil {
+			log.Err(err).Msg("failed to post message")
+			return err
+		}
+
+		sb.slackClient.Ack(*event.Request, nil)
+		return nil
+	}
+
+	reviewersNeeded := MAX_NUMBER_OF_REVIEWERS - len(reviewerMembers)
+
+	workloads := make(map[string]int)
+	for _, member := range availableMembers {
+		count := len(sb.teamMembersRepository.GetMemberWorkloadDetails(member.Id))
+		workloads[member.Id] = count
+	}
+
+	seniors := sb.teamMembersRepository.FilterAndSortBySeniority(availableMembers, models.SeniorityWeightSenior, workloads)
+	semiSeniors := sb.teamMembersRepository.FilterAndSortBySeniority(availableMembers, models.SeniorityWeightSemiSenior, workloads)
+	juniors := sb.teamMembersRepository.FilterAndSortBySeniority(availableMembers, models.SeniorityWeightJunior, workloads)
+
+	prioritizedMembers := make([]models.TeamMember, 0, len(availableMembers))
+	prioritizedMembers = append(prioritizedMembers, seniors...)
+	prioritizedMembers = append(prioritizedMembers, semiSeniors...)
+	prioritizedMembers = append(prioritizedMembers, juniors...)
+
+	reviewers := []models.TeamMember{}
+	usedIds := make(map[string]bool)
+
+	for _, member := range prioritizedMembers {
+		if usedIds[member.Id] || workloads[member.Id] >= MaxMRsPerPerson {
+			continue
+		}
+
+		reviewers = append(reviewers, member)
+		usedIds[member.Id] = true
+		// TODO: add the workload to the user in the in-memory db
+		// workloads[mem]
+
+		if len(reviewers) == reviewersNeeded {
+			break
+		}
+	}
+
+	// escalate if needed (ignore workload limits)
+	if len(reviewers) < reviewersNeeded {
+		for _, member := range prioritizedMembers {
+			if !usedIds[member.Id] {
+				reviewers := append(reviewers, member)
+				usedIds[member.Id] = true
+				if len(reviewers) == reviewersNeeded {
+					break
+				}
+			}
+		}
+	}
+
+	if len(reviewers) < reviewersNeeded {
+		needed := reviewersNeeded - len(reviewers)
+
+		admin, err := sb.teamMembersRepository.GetAdminMember()
+		msg := ""
+		if err != nil {
+			msg = fmt.Sprintf("Looks we need %d reviewers for this MR. Please talk with the tech lead to fix this.", needed)
+		} else {
+			msg = fmt.Sprintf("Looks like we need %d reviewers. Please talk with <@%s> to fix this.", needed, admin.SlackMemberID)
+		}
+		_, _, err = sb.slackClient.PostMessage(cmd.ChannelID, slack.MsgOptionText(
+			msg,
+			false,
+		))
+		if err != nil {
+			log.Err(err).Msg("needMoreReviewers: failed to post message")
+			return err
+		}
+
+		sb.slackClient.Ack(*event.Request, nil)
+		return nil
+	}
 
 	// 3. Use the gitlab api to update the MR and assign the two members
+	selectedMsg := []string{}
+	log.Debug().Msgf("selected reviewers %+v", reviewers)
+	for _, m := range reviewers {
+		selectedMsg = append(selectedMsg, fmt.Sprintf("<%s>", m.SlackMemberID))
+	}
+	_, _, err = sb.slackClient.PostMessage(cmd.ChannelID, slack.MsgOptionText(
+		fmt.Sprintf("The selected reviewers for this MR are: %s", strings.Join(selectedMsg, ", ")),
+		false,
+	))
+	if err != nil {
+		log.Err(err).Msg("selectedMsg: failed to post message")
+		sb.slackClient.Ack(*event.Request, nil)
+		return nil
+	}
 
 	// 4. Answer or sent back a message to the same channel/thread notifying the slack user that the MR has been assigned to two persons
 	// use the slack member ids to tag the reviewers so they can be notified too

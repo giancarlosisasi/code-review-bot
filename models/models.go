@@ -19,6 +19,7 @@ type TeamMember struct {
 	SeniorityWeight SeniorityWeight `json:"seniority_weight"`
 	// frontend, backend, etc
 	TeamGuild string `json:"team_guild"`
+	Role      string `json:'role"` // admin or developer
 }
 
 type WorkloadDetail struct {

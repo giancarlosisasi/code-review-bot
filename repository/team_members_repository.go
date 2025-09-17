@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/giancarlosisasi/code-review-bot/database"
 	"github.com/giancarlosisasi/code-review-bot/models"
@@ -15,6 +17,9 @@ type TeamMembersRepository interface {
 	GetMemberWorkload(memberID string) int
 	GetTeamMembersExcludingMembers(excludeGitlabMemberIDs []string, teamGuild *string) []models.TeamMember
 	FindTeamMembersByGuild(teamGuild string, teamMemberIDs []string) []models.TeamMember
+	FilterAndSortBySeniority(members []models.TeamMember, seniority models.SeniorityWeight, workloads map[string]int) []models.TeamMember
+	GetWorkloadDetailsByUser() models.WorkloadByUserID
+	GetAdminMember() (*models.TeamMember, error)
 }
 
 type TeamMembersInMemoryRepository struct {
@@ -107,4 +112,35 @@ func (r *TeamMembersInMemoryRepository) FindTeamMembersByGuild(teamGuild string,
 	}
 
 	return foundMembers
+}
+
+func (r *TeamMembersInMemoryRepository) FilterAndSortBySeniority(members []models.TeamMember, seniority models.SeniorityWeight, workloads map[string]int) []models.TeamMember {
+	var filtered []models.TeamMember
+	for _, member := range members {
+		if member.SeniorityWeight == seniority {
+			filtered = append(filtered, member)
+		}
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		left := len(r.inMemoryDB.WorkloadByUserID[filtered[i].Id])
+		right := len(r.inMemoryDB.WorkloadByUserID[filtered[j].Id])
+		return left < right
+	})
+
+	return filtered
+}
+
+func (r *TeamMembersInMemoryRepository) GetWorkloadDetailsByUser() models.WorkloadByUserID {
+	return r.inMemoryDB.WorkloadByUserID
+}
+
+func (r *TeamMembersInMemoryRepository) GetAdminMember() (*models.TeamMember, error) {
+	for _, member := range r.inMemoryDB.TeamMembers {
+		if member.Role == "admin" {
+			return &member, nil
+		}
+	}
+
+	return nil, errors.New("The user database must have a member with the `admin` role.")
 }
